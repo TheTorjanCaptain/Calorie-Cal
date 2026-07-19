@@ -2,10 +2,7 @@
 
 A calorie & macro calculator built for personal training and nutrition coaching clients. Pick a BMR formula, enter a client's stats, and get an instant daily calorie target with a full protein/carb/fat breakdown — no install, no build step, runs entirely in the browser.
 
-**Live demo:** _add your GitHub Pages link here once it's deployed, e.g. `https://<your-username>.github.io/Calorie-Cal/`_
-
-![Calorie-Cal screenshot](screenshot.png)
-_(add a screenshot here — see "Adding a screenshot" below)_
+![Calorie-Cal screenshot](calDemo.png)
 
 ---
 
@@ -68,10 +65,6 @@ git remote add origin https://github.com/<your-username>/Calorie-Cal.git
 git push -u origin main
 ```
 Then follow steps 2–4 above to enable Pages.
-
-## Adding a screenshot
-
-Take a screenshot of the calculator with a sample client filled in, save it as `screenshot.png` in this repo's root, and it'll automatically render at the top of this README on GitHub.
 
 ## Data & privacy
 
