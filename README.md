@@ -1,4 +1,4 @@
-# Calorie-Cal
+# Calorie-Cal: A Client Nutrition Calculator
 
 A calorie & macro calculator built for personal training and nutrition coaching clients. Pick a BMR formula, enter a client's stats, and get an instant daily calorie target with a full protein/carb/fat breakdown — no install, no build step, runs entirely in the browser.
 
