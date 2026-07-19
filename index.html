@@ -13,8 +13,11 @@
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
 
-<!-- Babel standalone lets the browser run JSX directly, no build step -->
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<!-- Babel standalone lets the browser run JSX directly, no build step.
+     Pinned to a specific version (not "latest") because newer releases
+     default to the "automatic" JSX runtime, which injects an ES `import`
+     statement that classic (non-module) <script> tags can't execute. -->
+<script src="https://unpkg.com/@babel/standalone@7.23.9/babel.min.js"></script>
 
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
