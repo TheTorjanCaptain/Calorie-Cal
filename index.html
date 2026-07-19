@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Client Facts — Nutrition Calculator</title>
+<meta name="description" content="Calorie and macro calculator for personal training and nutrition coaching clients." />
+
+<!-- Tailwind (CDN build, no install needed) -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- React + ReactDOM (production builds) -->
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+
+<!-- Babel standalone lets the browser run JSX directly, no build step -->
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+  body { font-family: 'Inter', ui-sans-serif, system-ui; }
+  .font-display { font-family: 'Fraunces', serif; }
+  .font-mono { font-family: 'IBM Plex Mono', monospace; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo } = React;
+
+// ---------- local storage helpers (swap-in for the old artifact window.storage API) ----------
+const STORAGE_KEY = "client-facts-clients";
+const storage = {
+  get() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      return [];
+    }
+  },
+  set(clients) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(clients));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  },
+};
+
+// ---------- constants ----------
+const ACTIVITY = [
+  { key: "sedentary", label: "Sedentary", sub: "Desk job, little to no exercise", mult: 1.2 },
+  { key: "light", label: "Lightly active", sub: "Light exercise 1-3 days/week", mult: 1.375 },
+  { key: "moderate", label: "Moderately active", sub: "Moderate exercise 3-5 days/week", mult: 1.55 },
+  { key: "very", label: "Very active", sub: "Hard exercise 6-7 days/week", mult: 1.725 },
+  { key: "extra", label: "Extremely active", sub: "Athlete / physical job + training", mult: 1.9 },
+];
+
+const GOALS = [
+  { key: "loss", label: "Fat loss" },
+  { key: "maintain", label: "Maintenance" },
+  { key: "gain", label: "Muscle gain" },
+];
+
+const INTENSITY = {
+  loss: [
+    { key: "mild", label: "Mild (-15%)", pct: -0.15 },
+    { key: "moderate", label: "Moderate (-20%)", pct: -0.20 },
+    { key: "aggressive", label: "Aggressive (-25%)", pct: -0.25 },
+  ],
+  gain: [
+    { key: "mild", label: "Lean (+10%)", pct: 0.10 },
+    { key: "moderate", label: "Standard (+15%)", pct: 0.15 },
+    { key: "aggressive", label: "Fast (+20%)", pct: 0.20 },
+  ],
+  maintain: [{ key: "moderate", label: "Maintenance (0%)", pct: 0 }],
+};
+
+const PROTEIN_PRESETS = { loss: 2.0, maintain: 1.8, gain: 2.0 };
+
+const BMR_FORMULAS = [
+  { key: "mifflin", label: "Mifflin-St Jeor", short: "Mifflin-St Jeor", requiresBF: false },
+  { key: "katch", label: "Katch-McArdle", short: "Katch-McArdle", requiresBF: true },
+  { key: "harris", label: "Harris-Benedict", short: "Harris-Benedict", requiresBF: false },
+];
+
+const emptyClient = () => ({
+  id: null,
+  name: "",
+  sex: "male",
+  age: "30",
+  height: "175",
+  weight: "75",
+  bodyFat: "",
+  bmrFormula: "mifflin",
+  activity: "moderate",
+  extraWorkoutKcal: "",
+  goal: "loss",
+  intensity: "moderate",
+  proteinPerKg: PROTEIN_PRESETS.loss,
+  fatPct: 28,
+  currentIntake: "",
+});
+
+// ---------- calculations ----------
+function getBMRInfo(c) {
+  const w = parseFloat(c.weight) || 0;
+  const h = parseFloat(c.height) || 0;
+  const a = parseFloat(c.age) || 0;
+  const bf = parseFloat(c.bodyFat);
+  const hasBF = !isNaN(bf) && bf > 0;
+
+  const mifflin = () => {
+    const base = 10 * w + 6.25 * h - 5 * a;
+    return c.sex === "male" ? base + 5 : base - 161;
+  };
+
+  if (c.bmrFormula === "katch") {
+    if (hasBF) {
+      const lbm = w * (1 - bf / 100);
+      return { bmr: 370 + 21.6 * lbm, formulaUsed: "katch", fallback: false };
+    }
+    return { bmr: mifflin(), formulaUsed: "mifflin", fallback: true };
+  }
+
+  if (c.bmrFormula === "harris") {
+    const bmr =
+      c.sex === "male"
+        ? 88.362 + 13.397 * w + 4.799 * h - 5.677 * a
+        : 447.593 + 9.247 * w + 3.098 * h - 4.33 * a;
+    return { bmr, formulaUsed: "harris", fallback: false };
+  }
+
+  return { bmr: mifflin(), formulaUsed: "mifflin", fallback: false };
+}
+
+function useCalc(c) {
+  return useMemo(() => {
+    const { bmr, formulaUsed, bmrFallback } = (() => {
+      const info = getBMRInfo(c);
+      return { bmr: info.bmr, formulaUsed: info.formulaUsed, bmrFallback: info.fallback };
+    })();
+    const activityObj = ACTIVITY.find((a) => a.key === c.activity) || ACTIVITY[2];
+    const tdeeBase = bmr * activityObj.mult;
+    const extra = parseFloat(c.extraWorkoutKcal) || 0;
+    const tdee = tdeeBase + extra;
+
+    const intensityList = INTENSITY[c.goal] || INTENSITY.maintain;
+    const intensityObj = intensityList.find((i) => i.key === c.intensity) || intensityList[0];
+    const target = tdee * (1 + (intensityObj ? intensityObj.pct : 0));
+
+    const w = parseFloat(c.weight) || 0;
+    const proteinG = c.proteinPerKg * w;
+    const proteinKcal = proteinG * 4;
+    const fatKcal = target * (c.fatPct / 100);
+    const fatG = fatKcal / 9;
+    const carbKcal = Math.max(target - proteinKcal - fatKcal, 0);
+    const carbG = carbKcal / 4;
+
+    const proteinPct = target > 0 ? (proteinKcal / target) * 100 : 0;
+    const fatPctActual = target > 0 ? (fatKcal / target) * 100 : 0;
+    const carbPct = target > 0 ? (carbKcal / target) * 100 : 0;
+
+    const current = parseFloat(c.currentIntake);
+    const delta = !isNaN(current) ? current - target : null;
+
+    return {
+      bmr, formulaUsed, bmrFallback, tdeeBase, extra, tdee, target,
+      proteinG, fatG, carbG, proteinKcal, fatKcal, carbKcal,
+      proteinPct, fatPctActual, carbPct, current, delta,
+      activityObj, intensityObj,
+    };
+  }, [c]);
+}
+
+// ---------- small components ----------
+function Field({ label, children, hint }) {
+  return (
+    <label className="block">
+      <span className="block text-[11px] font-semibold tracking-wide uppercase text-stone-500 mb-1">{label}</span>
+      {children}
+      {hint && <span className="block text-[11px] text-stone-400 mt-1">{hint}</span>}
+    </label>
+  );
+}
+
+const inputCls = "w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-[15px] text-stone-800 focus:outline-none focus:ring-2 focus:ring-emerald-700/40 focus:border-emerald-700";
+
+function NumberInput(props) {
+  return <input type="number" className={inputCls} {...props} />;
+}
+
+function MacroBar({ label, grams, kcal, pct, color }) {
+  return (
+    <div className="mb-3">
+      <div className="flex items-baseline justify-between mb-1">
+        <span className="text-sm font-semibold text-stone-800">{label}</span>
+        <span className="font-mono text-sm text-stone-700">
+          {Math.round(grams)} g <span className="text-stone-400">·</span> {Math.round(kcal)} kcal
+        </span>
+      </div>
+      <div className="h-2.5 w-full rounded-full bg-stone-100 overflow-hidden">
+        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.min(pct, 100)}%`, backgroundColor: color }} />
+      </div>
+      <div className="text-right text-[11px] font-mono text-stone-400 mt-0.5">{pct.toFixed(1)}%</div>
+    </div>
+  );
+}
+
+// ---------- main ----------
+function App() {
+  const [client, setClient] = useState(emptyClient());
+  const [clients, setClients] = useState([]);
+  const [savedMsg, setSavedMsg] = useState("");
+
+  const calc = useCalc(client);
+
+  useEffect(() => {
+    setClients(storage.get());
+  }, []);
+
+  function update(field, value) {
+    setClient((prev) => {
+      const next = { ...prev, [field]: value };
+      if (field === "goal") {
+        const list = INTENSITY[value] || INTENSITY.maintain;
+        next.intensity = list[Math.min(1, list.length - 1)].key;
+        next.proteinPerKg = PROTEIN_PRESETS[value] || 1.8;
+      }
+      return next;
+    });
+  }
+
+  function saveClient() {
+    if (!client.name.trim()) {
+      setSavedMsg("Add a client name before saving.");
+      setTimeout(() => setSavedMsg(""), 2200);
+      return;
+    }
+    const id = client.id || `c_${Date.now()}`;
+    const record = { ...client, id };
+    const others = clients.filter((c) => c.id !== id);
+    const next = [record, ...others];
+    setClients(next);
+    setClient(record);
+    const ok = storage.set(next);
+    setSavedMsg(ok ? "Saved." : "Save failed — try again.");
+    setTimeout(() => setSavedMsg(""), 2000);
+  }
+
+  function deleteClient(id) {
+    const next = clients.filter((c) => c.id !== id);
+    setClients(next);
+    storage.set(next);
+    if (client.id === id) setClient(emptyClient());
+  }
+
+  function loadClient(c) { setClient(c); }
+  function newClient() { setClient(emptyClient()); }
+
+  const goalLabel = GOALS.find((g) => g.key === client.goal)?.label || "";
+  const intensityOpts = INTENSITY[client.goal] || INTENSITY.maintain;
+
+  return (
+    <div className="min-h-screen w-full bg-[#F4F2ED] text-stone-800">
+      <div className="max-w-6xl mx-auto px-5 py-8">
+        <header className="flex items-baseline justify-between mb-8 border-b-4 border-stone-900 pb-4">
+          <div>
+            <h1 className="font-display text-3xl md:text-4xl font-semibold text-stone-900 tracking-tight">Client Facts</h1>
+            <p className="text-stone-500 text-sm mt-1">Calorie &amp; macro calculator — Mifflin-St Jeor / Katch-McArdle / Harris-Benedict</p>
+          </div>
+          <button onClick={newClient} className="text-sm font-semibold text-emerald-800 hover:text-emerald-900 border border-emerald-800/30 hover:border-emerald-800 rounded-md px-3 py-1.5 transition-colors">+ New client</button>
+        </header>
+
+        <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr_360px] gap-6">
+          <aside>
+            <h2 className="text-[11px] font-semibold tracking-wide uppercase text-stone-500 mb-2">Saved clients {clients.length > 0 && `(${clients.length})`}</h2>
+            {clients.length === 0 ? (
+              <p className="text-sm text-stone-400">No clients saved yet. Fill the form and save one.</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {clients.map((c) => (
+                  <li key={c.id}
+                    className={`group flex items-center justify-between rounded-md border px-3 py-2 cursor-pointer transition-colors ${client.id === c.id ? "border-emerald-800 bg-emerald-800/5" : "border-stone-200 bg-white hover:border-stone-300"}`}
+                    onClick={() => loadClient(c)}>
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-stone-800 truncate">{c.name}</div>
+                      <div className="text-[11px] text-stone-400">{GOALS.find((g) => g.key === c.goal)?.label}</div>
+                    </div>
+                    <button onClick={(e) => { e.stopPropagation(); deleteClient(c.id); }}
+                      className="opacity-0 group-hover:opacity-100 text-stone-400 hover:text-red-600 text-xs px-1.5 transition-opacity"
+                      aria-label={`Delete ${c.name}`}>✕</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="text-[11px] text-stone-400 mt-4 leading-relaxed">Saved to this browser's local storage only — not synced across devices, not visible to anyone else.</p>
+          </aside>
+
+          <section className="bg-white rounded-lg border border-stone-200 p-5">
+            <Field label="Client name">
+              <input type="text" className={inputCls} value={client.name} onChange={(e) => update("name", e.target.value)} placeholder="e.g. Rohan Sharma" />
+            </Field>
+
+            <div className="grid grid-cols-2 gap-4 mt-4">
+              <Field label="Sex">
+                <div className="flex rounded-md border border-stone-300 overflow-hidden">
+                  {["male", "female"].map((s) => (
+                    <button key={s} onClick={() => update("sex", s)}
+                      className={`flex-1 py-2 text-sm font-medium capitalize transition-colors ${client.sex === s ? "bg-emerald-800 text-white" : "bg-white text-stone-600 hover:bg-stone-50"}`}>{s}</button>
+                  ))}
+                </div>
+              </Field>
+              <Field label="Age (years)"><NumberInput value={client.age} onChange={(e) => update("age", e.target.value)} /></Field>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 mt-4">
+              <Field label="Height (cm)"><NumberInput value={client.height} onChange={(e) => update("height", e.target.value)} /></Field>
+              <Field label="Weight (kg)"><NumberInput value={client.weight} onChange={(e) => update("weight", e.target.value)} /></Field>
+            </div>
+
+            <div className="mt-5 pt-5 border-t border-stone-100">
+              <Field label="BMR formula">
+                <div className="flex rounded-md border border-stone-300 overflow-hidden">
+                  {BMR_FORMULAS.map((f) => (
+                    <button key={f.key} onClick={() => update("bmrFormula", f.key)}
+                      className={`flex-1 py-2 text-xs sm:text-sm font-medium transition-colors ${client.bmrFormula === f.key ? "bg-emerald-800 text-white" : "bg-white text-stone-600 hover:bg-stone-50"}`}>{f.short}</button>
+                  ))}
+                </div>
+              </Field>
+            </div>
+
+            <div className="mt-4">
+              <Field label="Body fat % (optional)" hint={client.bmrFormula === "katch" ? "Required for Katch-McArdle. Without it, this falls back to Mifflin-St Jeor below." : "Only used if you switch the BMR formula above to Katch-McArdle."}>
+                <NumberInput value={client.bodyFat} onChange={(e) => update("bodyFat", e.target.value)} placeholder="e.g. 18" />
+              </Field>
+              {calc.bmrFallback && (
+                <p className="text-[11px] text-amber-700 mt-1.5">Katch-McArdle selected but no body fat % entered — using Mifflin-St Jeor for now.</p>
+              )}
+            </div>
+
+            <div className="mt-5 pt-5 border-t border-stone-100">
+              <Field label="Activity level">
+                <div className="space-y-1.5">
+                  {ACTIVITY.map((a) => (
+                    <label key={a.key} className={`flex items-start gap-2.5 rounded-md border px-3 py-2 cursor-pointer transition-colors ${client.activity === a.key ? "border-emerald-800 bg-emerald-800/5" : "border-stone-200 hover:border-stone-300"}`}>
+                      <input type="radio" className="mt-1" checked={client.activity === a.key} onChange={() => update("activity", a.key)} />
+                      <div>
+                        <div className="text-sm font-medium text-stone-800">{a.label} <span className="font-mono text-xs text-stone-400">×{a.mult}</span></div>
+                        <div className="text-[12px] text-stone-500">{a.sub}</div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </Field>
+              <div className="mt-3">
+                <Field label="Extra training calories (optional)" hint="Add this only if planned workouts aren't already reflected in the activity level above — e.g. a dedicated calorie-tracked training block.">
+                  <NumberInput value={client.extraWorkoutKcal} onChange={(e) => update("extraWorkoutKcal", e.target.value)} placeholder="e.g. 300" />
+                </Field>
+              </div>
+            </div>
+
+            <div className="mt-5 pt-5 border-t border-stone-100">
+              <Field label="Goal">
+                <div className="flex rounded-md border border-stone-300 overflow-hidden">
+                  {GOALS.map((g) => (
+                    <button key={g.key} onClick={() => update("goal", g.key)}
+                      className={`flex-1 py-2 text-sm font-medium transition-colors ${client.goal === g.key ? "bg-emerald-800 text-white" : "bg-white text-stone-600 hover:bg-stone-50"}`}>{g.label}</button>
+                  ))}
+                </div>
+              </Field>
+              {intensityOpts.length > 1 && (
+                <div className="mt-3">
+                  <Field label="Intensity">
+                    <div className="flex rounded-md border border-stone-300 overflow-hidden">
+                      {intensityOpts.map((i) => (
+                        <button key={i.key} onClick={() => update("intensity", i.key)}
+                          className={`flex-1 py-2 text-xs font-medium transition-colors ${client.intensity === i.key ? "bg-stone-800 text-white" : "bg-white text-stone-600 hover:bg-stone-50"}`}>{i.label}</button>
+                      ))}
+                    </div>
+                  </Field>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-5 pt-5 border-t border-stone-100">
+              <div className="grid grid-cols-2 gap-4">
+                <Field label={`Protein target (g/kg) — ${client.proteinPerKg}`}>
+                  <input type="range" min="1.2" max="2.6" step="0.1" value={client.proteinPerKg} onChange={(e) => update("proteinPerKg", parseFloat(e.target.value))} className="w-full accent-emerald-800" />
+                </Field>
+                <Field label={`Fat (% of calories) — ${client.fatPct}%`}>
+                  <input type="range" min="15" max="40" step="1" value={client.fatPct} onChange={(e) => update("fatPct", parseFloat(e.target.value))} className="w-full accent-emerald-800" />
+                </Field>
+              </div>
+              <p className="text-[11px] text-stone-400 mt-2">Carbohydrates fill the remaining calories after protein and fat are set.</p>
+            </div>
+
+            <div className="mt-5 pt-5 border-t border-stone-100">
+              <Field label="Client's current daily intake (optional)" hint="If known, compares against the calculated target.">
+                <NumberInput value={client.currentIntake} onChange={(e) => update("currentIntake", e.target.value)} placeholder="e.g. 2100" />
+              </Field>
+            </div>
+
+            <div className="mt-6 flex items-center gap-3">
+              <button onClick={saveClient} className="bg-emerald-800 hover:bg-emerald-900 text-white text-sm font-semibold rounded-md px-4 py-2.5 transition-colors">Save client</button>
+              {savedMsg && <span className="text-sm text-stone-500">{savedMsg}</span>}
+            </div>
+          </section>
+
+          <section className="lg:sticky lg:top-8 self-start">
+            <div className="bg-white border-2 border-stone-900 rounded-sm p-5">
+              <div className="font-display text-2xl font-bold text-stone-900 leading-none">Client Facts</div>
+              <div className="text-[13px] text-stone-500 mt-1 mb-3">{client.name || "Unnamed client"} · {goalLabel}</div>
+
+              <div className="border-t-8 border-stone-900" />
+
+              <div className="py-2 flex items-baseline justify-between border-b border-stone-900">
+                <span className="font-display text-lg font-semibold">Daily Target</span>
+                <span className="font-mono text-3xl font-bold">{Math.round(calc.target)}<span className="text-sm font-medium text-stone-500 ml-1">kcal</span></span>
+              </div>
+
+              <div className="py-2 space-y-1 border-b border-stone-300 text-sm">
+                <div className="flex justify-between"><span className="text-stone-600">BMR (resting)</span><span className="font-mono">{Math.round(calc.bmr)} kcal</span></div>
+                <div className="flex justify-between"><span className="text-stone-600">+ Activity ({calc.activityObj.label}, ×{calc.activityObj.mult})</span><span className="font-mono">{Math.round(calc.tdeeBase - calc.bmr)} kcal</span></div>
+                {calc.extra > 0 && (
+                  <div className="flex justify-between"><span className="text-stone-600">+ Extra training</span><span className="font-mono">{Math.round(calc.extra)} kcal</span></div>
+                )}
+                <div className="flex justify-between font-medium pt-1"><span>= Maintenance (TDEE)</span><span className="font-mono">{Math.round(calc.tdee)} kcal</span></div>
+                <div className="flex justify-between text-stone-600">
+                  <span>{calc.intensityObj.pct === 0 ? "No adjustment" : calc.intensityObj.pct > 0 ? `Surplus (${calc.intensityObj.label})` : `Deficit (${calc.intensityObj.label})`}</span>
+                  <span className="font-mono">{calc.intensityObj.pct === 0 ? "—" : `${calc.intensityObj.pct > 0 ? "+" : ""}${Math.round(calc.tdee * calc.intensityObj.pct)} kcal`}</span>
+                </div>
+              </div>
+
+              {calc.delta !== null && (
+                <div className={`py-2 text-sm border-b border-stone-300 flex justify-between ${Math.abs(calc.delta) < 50 ? "text-emerald-700" : calc.delta > 0 ? "text-amber-700" : "text-blue-700"}`}>
+                  <span>Current intake vs. target</span>
+                  <span className="font-mono font-semibold">{calc.delta > 0 ? "+" : ""}{Math.round(calc.delta)} kcal</span>
+                </div>
+              )}
+
+              <div className="py-4">
+                <div className="font-display text-base font-semibold mb-3">Macronutrient Breakdown</div>
+                <MacroBar label="Protein" grams={calc.proteinG} kcal={calc.proteinKcal} pct={calc.proteinPct} color="#1f6d54" />
+                <MacroBar label="Carbohydrates" grams={calc.carbG} kcal={calc.carbKcal} pct={calc.carbPct} color="#c08a2e" />
+                <MacroBar label="Fat" grams={calc.fatG} kcal={calc.fatKcal} pct={calc.fatPctActual} color="#8a4a3d" />
+              </div>
+
+              <div className="border-t-4 border-stone-900 pt-2 text-[11px] text-stone-400 leading-relaxed">
+                BMR via {BMR_FORMULAS.find((f) => f.key === calc.formulaUsed)?.label}{calc.formulaUsed === "katch" ? ` (body fat ${client.bodyFat}%)` : ""}.
+                Protein set at {client.proteinPerKg} g/kg bodyweight; fat at {client.fatPct}% of target calories; carbs fill the remainder.
+                Re-assess every 2-4 weeks against real-world progress.
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+</script>
+</body>
+</html>
