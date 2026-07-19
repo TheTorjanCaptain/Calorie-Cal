@@ -1,2 +1,1 @@
-# Calorie-Cal
-A calorie &amp; macro calculator for personal training and nutrition coaching clients — supports Mifflin-St Jeor, Katch-McArdle, and Harris-Benedict BMR formulas. No install required, runs entirely in the browser.
+#Calorie-Cal is a lightweight, no-install calorie and macronutrient calculator built for fitness trainers and nutrition coaches. Choose between three BMR formulas (Mifflin-St Jeor, Katch-McArdle, Harris-Benedict), set activity level and goal, and get an instant daily calorie target with a full protein/carb/fat breakdown — ready to hand to a client in seconds.
