@@ -85,4 +85,4 @@ Macro presets (protein g/kg, fat %) are sensible defaults, not clinical prescrip
 
 ## License
 
-_Add a license here if you want others to be able to reuse/modify this — MIT is a common permissive choice for a tool like this. Leave blank if you'd rather keep all rights reserved._
+MIT
